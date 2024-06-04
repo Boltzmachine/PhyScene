@@ -236,7 +236,7 @@ class DiffusionSceneLayout_DDPM(Module):
 
     def sample(self, room_mask, num_points, point_dim, batch_size=1, room_outer_box=None, text=None, 
                floor_plan=None, floor_plan_centroid=None,
-               partial_boxes=None, input_boxes=None, ret_traj=False, ddim=False, clip_denoised=False, freq=40, batch_seeds=None, 
+               partial_boxes=None, input_boxes=None, ret_traj=False, ddim=False, clip_denoised=False, freq=40, batch_seeds=None, **kwargs 
                 ):
         device = room_mask.device
         noise = torch.randn((batch_size, num_points, point_dim))#, device=room_mask.device)
@@ -307,23 +307,23 @@ class DiffusionSceneLayout_DDPM(Module):
         print('unconditional / conditional generation sampling')
         # reverse sampling
         if ret_traj:
-            samples = self.diffusion.gen_sample_traj(noise.shape, room_mask.device, freq=freq, room_outer_box=room_outer_box, condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised)
+            samples = self.diffusion.gen_sample_traj(noise.shape, room_mask.device, freq=freq, room_outer_box=room_outer_box, condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised, **kwargs)
         else:
             import time
             t0 = time.time()
             samples = self.diffusion.gen_samples(noise.shape, room_mask.device, room_outer_box=room_outer_box,
                                                  floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid,
-                                                 condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised)
+                                                 condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised, **kwargs)
             t1 = time.time()
             # print(t1-t0)
         return samples
 
     @torch.no_grad()
-    def generate_layout(self, room_mask, num_points, point_dim, room_outer_box=None, floor_plan=None, floor_plan_centroid=None , batch_size=1, text=None, ret_traj=False, ddim=False, clip_denoised=False, batch_seeds=None, device="cpu", keep_empty=False):
+    def generate_layout(self, room_mask, num_points, point_dim, room_outer_box=None, floor_plan=None, floor_plan_centroid=None , batch_size=1, text=None, ret_traj=False, ddim=False, clip_denoised=False, batch_seeds=None, device="cpu", keep_empty=False, **kwargs):
         
         samples = self.sample(room_mask, num_points, point_dim, batch_size, room_outer_box=room_outer_box,
                               floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid,
-                              text=text, ret_traj=ret_traj, ddim=ddim, clip_denoised=clip_denoised, batch_seeds=batch_seeds)
+                              text=text, ret_traj=ret_traj, ddim=ddim, clip_denoised=clip_denoised, batch_seeds=batch_seeds, **kwargs)
         
         return self.delete_empty_from_network_samples(samples, device=device, keep_empty=keep_empty, batch_size = batch_size)
 

@@ -5,6 +5,7 @@ import torch.utils.data
 from torch.distributions import Normal
 import torch.distributed as dist
 import math
+import os
 import numpy as np
 import torch.distributed as dist
 from tqdm.auto import tqdm
@@ -300,7 +301,7 @@ class GaussianDiffusion:
 
     ''' samples '''
 
-    def p_sample(self, denoise_fn, data, t, condition, condition_cross, noise_fn, room_outer_box=None, floor_plan=None, floor_plan_centroid=None, clip_denoised=False, return_pred_xstart=False):
+    def p_sample(self, denoise_fn, data, t, condition, condition_cross, noise_fn, room_outer_box=None, floor_plan=None, floor_plan_centroid=None, clip_denoised=False, return_pred_xstart=False, **kwargs):
         """
         Sample from the model
         """
@@ -312,7 +313,7 @@ class GaussianDiffusion:
         nonzero_mask = torch.reshape(1 - (t == 0).float(), [data.shape[0]] + [1] * (len(data.shape) - 1))
 
         objectness = model_mean[:,:,self.bbox_dim+self.class_dim-1:self.bbox_dim+self.class_dim]<0
-
+        
         if self.optimizer is not None and t[0]<10:
             print("guidance on timestep "+str(int(t[0])))
             ## openai guided diffusion uses the input x to compute gradient, see
@@ -331,7 +332,7 @@ class GaussianDiffusion:
 
 
     def p_sample_loop(self, denoise_fn, shape, device, condition, condition_cross, room_outer_box=None, floor_plan=None, floor_plan_centroid=None,
-                      noise_fn=torch.randn, clip_denoised=True, keep_running=False):
+                      noise_fn=torch.randn, clip_denoised=True, keep_running=False, **kwargs):
         """
         Generate samples
         keep_running: True if we run 2 x num_timesteps, False if we just run num_timesteps
@@ -344,7 +345,7 @@ class GaussianDiffusion:
             img_t, xstart = self.p_sample(denoise_fn=denoise_fn, data=img_t,t=t_, room_outer_box=room_outer_box,  
                                           floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid,
                                           condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
-                                          clip_denoised=clip_denoised, return_pred_xstart=True)
+                                          clip_denoised=clip_denoised, return_pred_xstart=True, **kwargs)
             k_samples.append(xstart)
         assert img_t.shape == shape
 
@@ -671,10 +672,10 @@ class DiffusionPoint(nn.Module):
     
 
     def gen_samples(self, shape, device, room_outer_box=None, floor_plan=None, floor_plan_centroid=None, condition=None, condition_cross=None, noise_fn=torch.randn,
-                    clip_denoised=True, keep_running=False):
+                    clip_denoised=True, keep_running=False, **kwargs):
         return self.diffusion.p_sample_loop(self._denoise, room_outer_box=room_outer_box, floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid,
                                             shape=shape, device=device, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
-                                            clip_denoised=clip_denoised, keep_running=keep_running)
+                                            clip_denoised=clip_denoised, keep_running=keep_running, **kwargs)
 
     def gen_sample_traj(self, shape, device, freq, room_outer_box=None, condition=None, condition_cross=None, noise_fn=torch.randn,
                     clip_denoised=True,keep_running=False):

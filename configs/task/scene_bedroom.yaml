@@ -6,10 +6,10 @@ train:
   splits: ["train", "val"]
   batch_size: 128
   num_workers: 4
-  num_epochs: 60000
+  num_epochs: 6000
   log_step: 100
   log_epoch: 1
-  save_frequency: 2000
+  save_frequency: 200
   max_grad_norm: 10
   # optimizer
   optimizer: Adam
@@ -19,12 +19,19 @@ train:
   lr: 0.0002
   lr_step: 10000
   lr_decay: 0.5
-  
+
 test:
   splits: ["test"]
   batch_size: 128
   num_workers: 0
   frequency: 10
+
+feature_extractor:
+    name: "resnet18"
+    feature_size: 64
+    freeze_bn: true
+    input_channels: 1
+
 ## dataset
 dataset:
   name: ThreedFront
@@ -39,6 +46,7 @@ dataset:
   use_normal: false
   room_side: 3.1
   dataset_filtering: threed_front_bedroom
+  dataset_directory: "data/preprocessed_data/BedRoom/"
   dataset_type: "threedfront_objfeats_lat32"
   encoding_type: "diffusion_cosin_angle_objfeatsnorm_wocm_lat32" 
   annotation_file: "configs/data/bedroom_threed_front_splits.csv"
@@ -46,7 +54,7 @@ dataset:
   path_to_invalid_bbox_jids: "configs/data/black_list.txt"
   augmentations: ["rotations"] #["rotations","flip"] #["fixed_rotations"]
   filter_fn: "threed_front_bedroom"
-  train_stats: "data/preprocessed_data/BedRoom/dataset_stats.txt"
+  train_stats: "dataset_stats.txt"
   path_to_bounds: "data/bounds.npz"
   room_layout_size: "64,64"
   path_to_room_masks_dir: "data/room_mask"
@@ -84,7 +92,7 @@ evaluator:
   n_synthesized_scenes: 1000
   interval: 2000
   log_step: 100
-  weight_file: "outputs/bedroom_new_1120/model_58000" #model_30000" #model_42000"
+  weight_file: null
   
   CKL_In_train: true
 

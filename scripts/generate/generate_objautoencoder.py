@@ -8,18 +8,19 @@ import numpy as np
 import torch
 from torch.utils.data import DataLoader
 import pickle
-from scripts.train.training_utils import id_generator, load_config
+# from scripts.train.training_utils import id_generator, load_config
 import hydra
 from omegaconf import DictConfig, OmegaConf
 from datasets.base import filter_function
 from models.networks import optimizer_factory, schedule_factory
 # from scene_diffusion.stats_logger import StatsLogger, WandB
-from scripts.train.training_utils import load_checkpoints
+# from scripts.train.training_utils import load_checkpoints
 from models.networks.foldingnet_autoencoder import AutoEncoder, KLAutoEncoder, train_on_batch, validate_on_batch
 from datasets.threed_front import ThreedFront
 from datasets.threed_future_dataset import ThreedFutureNormPCDataset
 from datasets.utils_io import export_pointcloud, load_pointcloud
 from datasets.gapartnet_dataset import GAPartNetDataset
+
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="autoencoder")
 def main(cfg: DictConfig):
@@ -139,15 +140,15 @@ def main(cfg: DictConfig):
     # Build the dataset of Garpartnet
     pickled_GPN_dir = cfg.GAPartNet.pickled_GPN_dir
     pickled_GPN_path = "{}/gapartnet_model.pkl".format(pickled_GPN_dir)
-    if os.path.exists(pickled_GPN_path):
-        gapartnet_dataset = GAPartNetDataset.from_pickled_dataset(pickled_GPN_path)
-    else:
-        gapartnet_dataset = GAPartNetDataset(cfg)
-        with open(pickled_GPN_path, "wb") as f:
-            pickle.dump(gapartnet_dataset, f)
+    # if os.path.exists(pickled_GPN_path):
+    #     gapartnet_dataset = GAPartNetDataset.from_pickled_dataset(pickled_GPN_path)
+    # else:
+    #     gapartnet_dataset = GAPartNetDataset(cfg)
+    #     with open(pickled_GPN_path, "wb") as f:
+    #         pickle.dump(gapartnet_dataset, f)
 
-    for obj in gapartnet_dataset.objects:
-        train_objects[obj.model_jid] = obj
+    # for obj in gapartnet_dataset.objects:
+    #     train_objects[obj.model_jid] = obj
 
     train_objects = [vi for vi in train_objects.values()]
     train_dataset = ThreedFutureNormPCDataset(train_objects)
@@ -192,7 +193,7 @@ def main(cfg: DictConfig):
     optimizer = optimizer_factory(config_VAE["training"], filter(lambda p: p.requires_grad, network.parameters()) ) 
 
     # Load the checkpoints if they exist in the experiment directory
-    load_checkpoints(network, optimizer, experiment_directory, cfg, device)
+    # load_checkpoints(network, optimizer, experiment_directory, cfg, device)
     # Load the learning rate scheduler 
     lr_scheduler = schedule_factory(config_VAE["training"])
 

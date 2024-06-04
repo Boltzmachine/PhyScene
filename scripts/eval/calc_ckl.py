@@ -13,6 +13,7 @@ import os
 import sys
 from scipy.ndimage import binary_dilation
 import cv2
+import math
 import numpy as np
 import torch
 import json
@@ -46,7 +47,7 @@ from simple_3dviz.behaviours.misc import LightToCamera
 from utils.utils import get_textured_objects
 from simple_3dviz.behaviours.keyboard import SnapshotOnKey, SortTriangles
 from simple_3dviz.behaviours.misc import LightToCamera
-from simple_3dviz.window import show
+# from simple_3dviz.window import show
 from utils.utils_preprocess import render as render_top2down
 from pyrr import Matrix44
 from simple_3dviz.renderables.mesh import Mesh
@@ -124,6 +125,62 @@ def show_renderables(renderables):
         return
 
 
+class save_states:
+    def __init__(self, process_func):
+        self.process_func = process_func
+        self.output_directory = "data/reward_training1/"
+        os.makedirs(self.output_directory, exist_ok=True)
+        self.mesh_format = ".glb"
+
+    def __call__(self, scene_ids, xt, step):
+        assert (step[0] == step).all()
+        current_step = step[0].item()
+        if current_step % 1 != 0:
+            return
+        # for scene_id, xt_, class_labels, translations, sizes, angles, objfeats, t in zip(scene.scene_id, xt, box_params["class_labels"], box_params["translations"], box_params["sizes"], box_params["angles"], box_params["objfeats"], step):
+
+        for scene_id, xt_, t, in zip(scene_ids, xt, step):
+            output_directory = os.path.join(self.output_directory, scene_id.item(), f"step{t.item():04d}")
+            os.makedirs(output_directory, exist_ok=True)
+
+            box_params_ = self.process_func(xt_.unsqueeze(0))
+
+            raw_path = os.path.join(output_directory, f"raw.pt")
+            torch.save(xt_, raw_path)
+            # bbox_params_t = torch.cat([
+            #     class_labels,
+            #     translations, # 3
+            #     sizes, # 3
+            #     angles # 1
+            # ], dim=-1).cpu().numpy()
+            # box_params_ = {
+            #     "class_labels": class_labels.cpu().numpy(),
+            #     "translations": translations.cpu().numpy(),
+            #     "sizes": sizes.cpu().numpy(),
+            #     "angles": angles.cpu().numpy(),
+            #     "objfeats": objfeats.cpu().numpy(),
+            # }
+            # renderables, trimesh_meshes, model_jids = get_textured_objects_based_on_objfeats(
+            #     bbox_params_t, objects_dataset, classes, diffusion=True, no_texture=False, query_objfeats=objfeats, 
+            # )
+            # trimesh_meshes += scene.tr_floor
+            npy_path = os.path.join(output_directory, f"box_params.npy")
+            np.save(npy_path, box_params_)
+        # # model_path = os.path.join(output_directory, f'model{self.mesh_format}')
+        # # image_path = os.path.join(output_directory, f'image.png')
+        # # info_path = os.path.join(output_directory, f'info.json')
+
+        # # whole_scene_mesh = trimesh.util.concatenate(trimesh_meshes)
+        # # whole_scene_mesh.export(model_path)
+        # # self.renderer.render_model(model_path, image_path)
+
+        # # info = {
+        # #     "scene_id": scene.scene_id.item(),
+        # #     "text": text,
+        # # }
+        # # json.dump(info, open(info_path, "w"))
+
+
 @hydra.main(version_base=None, config_path="../../configs", config_name="default")
 def main(cfg: DictConfig) -> None:
     
@@ -193,8 +250,6 @@ def main(cfg: DictConfig) -> None:
         network=None
 
     classes = np.array(dataset.class_labels)
-
-    
     
     eva_result = evaluate(network,dataset,config,raw_dataset,ground_truth_scenes,device)
     CKL, overlap_ratio, walkable_average_rate, accessable_rate,box_wall_rate = eva_result
@@ -220,9 +275,9 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
     if cfg.evaluation.save_result:
         boxes_save = []
         scene_id_save = []
-
     if not cfg.evaluation.load_result:
         idx = 0
+        predictions = []
         for i in range(cfg.task.evaluator.n_synthesized_scenes//batch_size+1):
             
             print("{} / {}:".format(
@@ -266,7 +321,6 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
                 tr_floor_lst.append(tr_floor)
             room_mask = torch.concat(room_lst)
             room_outer_box = torch.concat(room_outer_box_lst)
-
             bbox_params = network.generate_layout(
                 room_mask=room_mask.to(device),
                 room_outer_box=room_outer_box,
@@ -279,7 +333,8 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
                 device=device,
                 clip_denoised=cfg.clip_denoised,
                 batch_seeds=torch.arange(i, i+1),
-                keep_empty = True
+                keep_empty = True,
+                scene_id_lst = scene_id_lst,
             )
 
             boxes = dataset.post_process(bbox_params)
@@ -289,7 +344,7 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
             if cfg.evaluation.visual:
                 # show_scene(boxes,objects_dataset,dataset,gapartnet_dataset, cfg,floor_plan_lst,tr_floor_lst, room_outer_box_lst,scene_id_lst,scene_idx_lst,idx,render2img=render2img)
                 render_scene_all(boxes,objects_dataset,dataset,gapartnet_dataset,cfg,room_lst,floor_plan_lst,floor_plan_mask_batch_list,floor_plan_centroid_batch_list,
-                        tr_floor_lst,room_outer_box_lst,scene_id_lst,scene_idx_lst)
+                        tr_floor_lst,room_outer_box_lst,scene_id_lst,scene_idx_lst, predictions=predictions,raw_dataset=raw_dataset)
             for j in range(boxes["class_labels"].shape[0]):
                 synthesized_scenes.append({
                     k: v[j].cpu().numpy()
@@ -359,28 +414,28 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
                 cfg.task.dataset.use_feature = False
 
         
-    #generate image
-    if cfg.evaluation.visual:
-        render_scene_all(boxes,objects_dataset,dataset,gapartnet_dataset,cfg,room_lst,floor_plan_lst,floor_plan_mask_list,floor_plan_centroid_list,
-                        tr_floor_lst,room_outer_box_lst,scene_id_lst,scene_idx_lst)
-    #collision rate
-    print("collision type", cfg.evaluation.overlap_type)
-    if cfg.evaluation.overlap_type == "rotated_bbox":
-        overlap_ratio = calc_overlap_rotate_bbox(synthesized_scenes)
-    else:    
-        #"bbox_no_direction", "mesh", "grid_for_depth"
-        overlap_ratio = calc_overlap(synthesized_scenes,classes,cfg)
-    print(cfg.evaluation.jsonname)
-    # print(overlap_ratio)
+    # #generate image
+    # if cfg.evaluation.visual:
+    #     render_scene_all(boxes,objects_dataset,dataset,gapartnet_dataset,cfg,room_lst,floor_plan_lst,floor_plan_mask_list,floor_plan_centroid_list,
+    #                     tr_floor_lst,room_outer_box_lst,scene_id_lst,scene_idx_lst)
+    # #collision rate
+    # print("collision type", cfg.evaluation.overlap_type)
+    # if cfg.evaluation.overlap_type == "rotated_bbox":
+    #     overlap_ratio = calc_overlap_rotate_bbox(synthesized_scenes)
+    # else:    
+    #     #"bbox_no_direction", "mesh", "grid_for_depth"
+    #     overlap_ratio = calc_overlap(synthesized_scenes,classes,cfg)
+    # print(cfg.evaluation.jsonname)
+    # # print(overlap_ratio)
 
-    CKL, gt_class_labels, syn_class_labels = calc_CKL(synthesized_scenes,ground_truth_scenes,classes)
-    print(cfg.evaluation.jsonname)
-    print(CKL)
+    # CKL, gt_class_labels, syn_class_labels = calc_CKL(synthesized_scenes,ground_truth_scenes,classes)
+    # print(cfg.evaluation.jsonname)
+    # print(CKL)
 
-    walkable_average_rate, accessable_rate,box_wall_rate = calc_wall_overlap(synthesized_scenes, floor_plan_mask_list, floor_plan_centroid_list, cfg, robot_real_width=0.3,classes=classes)
+    # walkable_average_rate, accessable_rate,box_wall_rate = calc_wall_overlap(synthesized_scenes, floor_plan_mask_list, floor_plan_centroid_list, cfg, robot_real_width=0.3,classes=classes)
 
     
-    return CKL, overlap_ratio, walkable_average_rate, accessable_rate,box_wall_rate
+    # return CKL, overlap_ratio, walkable_average_rate, accessable_rate,box_wall_rate
 
 
 
@@ -730,9 +785,49 @@ def show_scene(boxes,objects_dataset,dataset,gapartnet_dataset,cfg,floor_plan_ls
                 # o3d.io.write_triangle_mesh(path_to_scene, whole_scene_mesh)
     return
 
+
+def get_textured_object_ids_based_on_objfeats(bbox_params_t, objects_dataset, classes, cfg):
+    models = []
+    class_num = cfg.task.dataset.class_num
+
+    for j in range(bbox_params_t.shape[1]):
+        query_label = classes[bbox_params_t[0, j, :class_num].argmax(-1)]  #TODO
+        
+        if query_label == 'empty':
+            continue
+            
+        translation = bbox_params_t[0, j, class_num:class_num+3]
+        query_size = bbox_params_t[0, j, class_num+3:class_num+6]
+        
+        theta = bbox_params_t[0, j, class_num+6]
+        query_objfeat = bbox_params_t[0, j, class_num+7:]
+        
+        furniture = objects_dataset.get_closest_furniture_to_objfeats_and_size(
+            query_label, query_objfeat, query_size
+        )
+        raw_bbox_vertices = np.load(furniture.path_to_bbox_vertices, mmap_mode="r") #np.array(raw_mesh.bounding_box.vertices)
+        raw_sizes = np.array([
+            np.sqrt(np.sum((raw_bbox_vertices[4]-raw_bbox_vertices[0])**2))/2,
+            np.sqrt(np.sum((raw_bbox_vertices[2]-raw_bbox_vertices[0])**2))/2,
+            np.sqrt(np.sum((raw_bbox_vertices[1]-raw_bbox_vertices[0])**2))/2
+        ])
+        scale = query_size / raw_sizes
+        
+        model_jid = (furniture.raw_model_path).split('/')[-2]
+        models.append((query_label, {
+            "model_jid": model_jid,
+            'left': translation[0].item(),
+            'top': translation[2].item(),
+            'depth': translation[1].item(),
+            "orientation": theta.item(),
+            "scale": scale.tolist(),
+        }))
+
+    return models
+
 def render_scene_all(boxes,objects_dataset,dataset,gapartnet_dataset,cfg,room_lst,
                         floor_plan_lst,floor_plan_mask_list,floor_plan_centroid_list,
-                        tr_floor_lst,room_outer_box_lst,scene_id_lst,scene_idx_lst):
+                        tr_floor_lst,room_outer_box_lst,scene_id_lst,scene_idx_lst,predictions=None,raw_dataset=None):
     if not cfg.task.dataset.use_feature:  #atiss
         bbox_params_t = np.concatenate([
             boxes["class_labels"],
@@ -779,8 +874,21 @@ def render_scene_all(boxes,objects_dataset,dataset,gapartnet_dataset,cfg,room_ls
         bbox_param = bbox_params_t[i:i+1]
 
         renderables, trimesh_meshes, _,_, _  = get_textured_objects(
-            bbox_param, objects_dataset, gapartnet_dataset, classes, cfg
+            bbox_param, objects_dataset, gapartnet_dataset, classes, cfg, return_remesh=False
         )
+        
+        models = get_textured_object_ids_based_on_objfeats(
+            bbox_param, objects_dataset, classes, cfg
+        )
+        current_scene = raw_dataset[scene_idx_lst[i]]
+        assert scene_id_lst[i] == current_scene.scene_id
+        prediction = {
+            "query_id": current_scene.uid,
+            "object_list": models,
+        }
+        if predictions is not None:
+            predictions.append(prediction)
+            json.dump(predictions, open(os.path.join(cfg.evaluation.render_save_path, "predictions.json"), "w"))
 
         if not cfg.evaluation.without_floor:
             renderables += floor_plan_lst[i]

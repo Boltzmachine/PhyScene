@@ -17,7 +17,7 @@ from simple_3dviz import Mesh
 from simple_3dviz.renderables.textured_mesh import Material, TexturedMesh
 from simple_3dviz.renderables.base import RenderableCollection
 
-def get_textured_objects(bbox_params_t, objects_dataset, gapartnet_dataset, classes, cfg = None):
+def get_textured_objects(bbox_params_t, objects_dataset, gapartnet_dataset, classes, cfg = None, return_remesh: bool = True):
     # For each one of the boxes replace them with an object
     renderables = []
     renderables_remesh = []
@@ -42,7 +42,7 @@ def get_textured_objects(bbox_params_t, objects_dataset, gapartnet_dataset, clas
             
             if query_label == 'empty':
                 continue
-            if data == "3dfront" and (gapartnet_dataset==None or query_label not in MapThreedfuture2gparnet):                    
+            if data == "3dfront" and (gapartnet_dataset==None or query_label not in MapThreedfuture2gparnet):             
                 if use_feature:
                     furniture = objects_dataset.get_closest_furniture_to_objfeats_and_size(
                         query_label, query_objfeat, query_size
@@ -80,14 +80,15 @@ def get_textured_objects(bbox_params_t, objects_dataset, gapartnet_dataset, clas
                 renderables.append(raw_mesh)
 
 
-                #load remesh model for collision rate
-                raw_mesh = TexturedMesh.from_file(furniture.remesh_model_path)
-                raw_mesh.scale(furniture.scale)
+                if return_remesh:
+                    #load remesh model for collision rate
+                    raw_mesh = TexturedMesh.from_file(furniture.remesh_model_path)
+                    raw_mesh.scale(furniture.scale)
 
-                # Apply the transformations in order to correctly position the mesh
-                raw_mesh.affine_transform(t=-centroid)
-                raw_mesh.affine_transform(R=R, t=translation)
-                renderables_remesh.append(raw_mesh)
+                    # Apply the transformations in order to correctly position the mesh
+                    raw_mesh.affine_transform(t=-centroid)
+                    raw_mesh.affine_transform(R=R, t=translation)
+                    renderables_remesh.append(raw_mesh)
 
                 # Create a trimesh object for the same mesh in order to save
                 # everything as a single scene
@@ -181,13 +182,13 @@ def get_textured_objects(bbox_params_t, objects_dataset, gapartnet_dataset, clas
                     except:
                         GPN_renderables.append(raw_mesh)
 
-
-                if len(GPN_renderables) == 1:
-                    renderables_remesh.append(GPN_renderables[0])
-                else:
-                    renderables_remesh.append(RenderableCollection(GPN_renderables))
-                if furniture.model_jid not in scene_info["GPN"]:
-                    scene_info["GPN"][furniture.model_jid]  =[]
+                if return_remesh:
+                    if len(GPN_renderables) == 1:
+                        renderables_remesh.append(GPN_renderables[0])
+                    else:
+                        renderables_remesh.append(RenderableCollection(GPN_renderables))
+                    if furniture.model_jid not in scene_info["GPN"]:
+                        scene_info["GPN"][furniture.model_jid]  =[]
                 #final size = query size = scale*size
                 scene_info["GPN"][furniture.model_jid].append({"path":furniture.raw_model_path, \
                                                         "scale": [float(s) for s in scale.tolist()], \

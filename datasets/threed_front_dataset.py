@@ -1139,7 +1139,7 @@ def dataset_encoding_factory(
             angles, 
             # objfeats,
             objfeats_32,
-            objfeats_pc_ulip
+            # objfeats_pc_ulip
         )
 
     # if isinstance(augmentations, list):

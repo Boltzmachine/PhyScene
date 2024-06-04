@@ -14,10 +14,10 @@ no_texture: false
 without_floor: false
 add_objfeats: true
 
-BASE_DIR: /home/yandan/workspace/PhyScene
+BASE_DIR: /home/qiuweikang/project/LayoutPPT/third_party/PhyScene
 PATH_TO_SCENES: "data/threed_front.pkl"     
 
-3DFRONT_dir: /home/yandan/dataset/3D-scene
+3DFRONT_dir: /home/qiuweikang/project/LayoutPPT/third_party/PhyScene/data
 path_to_floor_plan_textures: ${3DFRONT_dir}/3D-FRONT-texture/
 dataset:
 # for object autoencoder
@@ -29,9 +29,9 @@ dataset:
   
 ai2thor:
   path_to_ai2thor: "/home/yandan/workspace/ai2thor/ExportedObj-good"
-  path_to_center_info: /home/yandan/workspace/PhyScene/ai2thor/center.json
-  path_to_mask: /home/yandan/workspace/PhyScene/ai2thor/mask
-  path_to_result: /home/yandan/workspace/PhyScene/ai2thor/generate
+  path_to_center_info: /home/qiuweikang/project/LayoutPPT/third_party/PhyScene/ai2thor/center.json
+  path_to_mask: /home/qiuweikang/project/LayoutPPT/third_party/PhyScene/ai2thor/mask
+  path_to_result: /home/qiuweikang/project/LayoutPPT/third_party/PhyScene/ai2thor/generate
   path_to_json: "/home/yandan/workspace/ai2thor/House_Json"
 
 GAPartNet:

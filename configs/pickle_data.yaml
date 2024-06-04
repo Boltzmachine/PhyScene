@@ -17,10 +17,10 @@ no_texture: false
 without_floor: false
 add_objfeats: true
 
-BASE_DIR: /home/yandan/workspace/PhyScene
+BASE_DIR: ./
 PATH_TO_SCENES: "data/threed_front.pkl"     
 
-3DFRONT_dir: /home/yandan/dataset/3D-scene
+3DFRONT_dir: ./data
 path_to_floor_plan_textures: ${3DFRONT_dir}/3D-FRONT-texture/
 dataset:
 # for object autoencoder

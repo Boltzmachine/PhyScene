@@ -174,7 +174,7 @@ def main(cfg: DictConfig):
                     sizes=es["sizes"],
                     angles=es["angles"],
                     objfeats_32=es["objfeats_32"],
-                    objfeats_pc_ulips=es["objfeats_pc_ulip"],
+                    # objfeats_pc_ulips=es["objfeats_pc_ulip"],
                 )
                     # objfeats=es["objfeats"],
             else:

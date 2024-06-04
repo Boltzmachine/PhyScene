@@ -184,10 +184,10 @@ class Encoder(nn.Module):
 
         # get the covariances, reshape and concatenate with x
         knn_idx = knn(x, k=16)
+        
         knn_x = index_points(x.permute(0, 2, 1), knn_idx)  # (B, N, 16, 3)
         mean = torch.mean(knn_x, dim=2, keepdim=True)
         knn_x = knn_x - mean
-
         covariances = torch.matmul(knn_x.permute(0, 1, 3, 2), knn_x).view(b, n, -1).permute(0, 2, 1)
         x = torch.cat([x, covariances], dim=1)  # (B, 12, N)
 

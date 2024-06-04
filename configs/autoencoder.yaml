@@ -19,9 +19,9 @@ n_processes: 0
 seed: 27
 with_wandb_logger: True
 
-BASE_DIR: /home/yandan/workspace/PhyScene
+BASE_DIR: ./
 PATH_TO_SCENES: "data/threed_front.pkl"    
-3DFRONT_dir: /home/yandan/dataset/3D-scene
+3DFRONT_dir: ./data
 dataset:
 # for object autoencoder
   path_to_3d_front_dataset_directory: ${3DFRONT_dir}/3D-FRONT

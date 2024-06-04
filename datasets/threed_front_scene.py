@@ -18,7 +18,7 @@ from simple_3dviz.behaviours.keyboard import SnapshotOnKey
 from simple_3dviz.behaviours.misc import LightToCamera
 import math
 from utils.open3d_vis_utils import draw_box_label
-from simple_3dviz.window import show
+# from simple_3dviz.window import show
 
 
 def rotation_matrix(axis, theta):
