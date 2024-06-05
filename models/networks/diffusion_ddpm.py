@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from .loss import axis_aligned_bbox_overlaps_3d
 from models.optimizer.optimizer import Optimizer
 import time
+from tqdm import trange
 
 def norm(v, f):
     v = (v - v.min())/(v.max() - v.min()) - 0.5
@@ -314,6 +315,7 @@ class GaussianDiffusion:
 
         objectness = model_mean[:,:,self.bbox_dim+self.class_dim-1:self.bbox_dim+self.class_dim]<0
         
+        # kwargs["save_states_func"](kwargs['scene_id_lst'], model_mean, t)
         if self.optimizer is not None and t[0]<10:
             print("guidance on timestep "+str(int(t[0])))
             ## openai guided diffusion uses the input x to compute gradient, see
@@ -340,7 +342,7 @@ class GaussianDiffusion:
         assert isinstance(shape, (tuple, list))
         img_t = noise_fn(size=shape, dtype=torch.float, device=device)
         k_samples = []
-        for t in reversed(range(0, self.num_timesteps if not keep_running else len(self.betas))):
+        for t in reversed(trange(0, self.num_timesteps if not keep_running else len(self.betas))):
             t_ = torch.empty(shape[0], dtype=torch.int64, device=device).fill_(t)
             img_t, xstart = self.p_sample(denoise_fn=denoise_fn, data=img_t,t=t_, room_outer_box=room_outer_box,  
                                           floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid,

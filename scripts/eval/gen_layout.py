@@ -14,10 +14,11 @@ import sys
 from scipy.ndimage import binary_dilation
 import cv2
 import math
+import multiprocess
 import numpy as np
 import torch
 import json
-sys.path.insert(0,sys.path[0]+"/../../")
+sys.path.insert(0, os.path.dirname(__file__) +"/../../")
 from utils.utils_preprocess import floor_plan_from_scene, room_outer_box_from_scene
 
 from datasets.base import filter_function, get_dataset_raw_and_encoded
@@ -44,7 +45,7 @@ from omegaconf import DictConfig, OmegaConf
 # from generate_diffusion import show_scene
 from simple_3dviz.behaviours.keyboard import SnapshotOnKey, SortTriangles
 from simple_3dviz.behaviours.misc import LightToCamera
-from utils.utils import get_textured_objects
+from utils.utils import get_textured_objects, get_textured_object_ids_based_on_objfeats
 from simple_3dviz.behaviours.keyboard import SnapshotOnKey, SortTriangles
 from simple_3dviz.behaviours.misc import LightToCamera
 # from simple_3dviz.window import show
@@ -125,12 +126,41 @@ def show_renderables(renderables):
         return
 
 
+
 class SaveStates:
     def __init__(self, process_func):
         self.process_func = process_func
         self.output_directory = "data/reward_training1/"
         os.makedirs(self.output_directory, exist_ok=True)
         self.mesh_format = ".glb"
+        self.num_workers = 0
+
+    def save(self, scene_id, xt, box_params, t):
+        output_directory = os.path.join(self.output_directory, scene_id, f"step{t.item():04d}")
+        os.makedirs(output_directory, exist_ok=True)
+
+        raw_path = os.path.join(output_directory, f"raw.pt")
+        torch.save(xt, raw_path)
+        # trimesh_meshes += scene.tr_floor
+        objectness = box_params.pop("objectness").squeeze(-1)
+        for k, v in box_params.items():
+            box_params[k] = v[objectness < 0]
+        npy_path = os.path.join(output_directory, f"box_params.npy")
+        np.save(npy_path, box_params)
+        # model_path = os.path.join(output_directory, f'model{self.mesh_format}')
+        # image_path = os.path.join(output_directory, f'image.png')
+        # info_path = os.path.join(output_directory, f'info.json')
+
+        # whole_scene_mesh = trimesh.util.concatenate(trimesh_meshes)
+        # whole_scene_mesh.export(model_path)
+        # self.renderer.render_model(model_path, image_path)
+
+        # info = {
+        #     "scene_id": scene.scene_id.item(),
+        #     "text": text,
+        # }
+        # json.dump(info, open(info_path, "w"))
+
 
     def __call__(self, scene_ids, xt, step):
         assert (step[0] == step).all()
@@ -138,47 +168,18 @@ class SaveStates:
         if current_step % 1 != 0:
             return
         # for scene_id, xt_, class_labels, translations, sizes, angles, objfeats, t in zip(scene.scene_id, xt, box_params["class_labels"], box_params["translations"], box_params["sizes"], box_params["angles"], box_params["objfeats"], step):
+        # for args in zip(scene_ids, xt, step):
+        #     self.save(*args)
+        bs = len(scene_ids)
+        box_params = self.process_func(xt, True)
+        box_params = [{k: v[j] for k, v in box_params.items()} for j in range(bs)]
 
-        for scene_id, xt_, t, in zip(scene_ids, xt, step):
-            output_directory = os.path.join(self.output_directory, scene_id, f"step{t.item():04d}")
-            os.makedirs(output_directory, exist_ok=True)
-
-            box_params_ = self.process_func(xt_.unsqueeze(0))
-
-            raw_path = os.path.join(output_directory, f"raw.pt")
-            torch.save(xt_, raw_path)
-            # bbox_params_t = torch.cat([
-            #     class_labels,
-            #     translations, # 3
-            #     sizes, # 3
-            #     angles # 1
-            # ], dim=-1).cpu().numpy()
-            # box_params_ = {
-            #     "class_labels": class_labels.cpu().numpy(),
-            #     "translations": translations.cpu().numpy(),
-            #     "sizes": sizes.cpu().numpy(),
-            #     "angles": angles.cpu().numpy(),
-            #     "objfeats": objfeats.cpu().numpy(),
-            # }
-            # renderables, trimesh_meshes, model_jids = get_textured_objects_based_on_objfeats(
-            #     bbox_params_t, objects_dataset, classes, diffusion=True, no_texture=False, query_objfeats=objfeats, 
-            # )
-            # trimesh_meshes += scene.tr_floor
-            npy_path = os.path.join(output_directory, f"box_params.npy")
-            np.save(npy_path, box_params_)
-        # # model_path = os.path.join(output_directory, f'model{self.mesh_format}')
-        # # image_path = os.path.join(output_directory, f'image.png')
-        # # info_path = os.path.join(output_directory, f'info.json')
-
-        # # whole_scene_mesh = trimesh.util.concatenate(trimesh_meshes)
-        # # whole_scene_mesh.export(model_path)
-        # # self.renderer.render_model(model_path, image_path)
-
-        # # info = {
-        # #     "scene_id": scene.scene_id.item(),
-        # #     "text": text,
-        # # }
-        # # json.dump(info, open(info_path, "w"))
+        if self.num_workers > 1:
+            with multiprocess.Pool(self.num_workers) as p:
+                p.starmap(self.save, zip(scene_ids, xt, box_params, step))
+        else:
+            for args in zip(scene_ids, xt, box_params, step):
+                self.save(*args)
 
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="default")
@@ -262,7 +263,7 @@ def main(cfg: DictConfig) -> None:
 
 def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
     classes = np.array(dataset.class_labels)
-    process_func = lambda x: dataset.post_process(network.delete_empty_from_network_samples(x, device=device, keep_empty=False))
+    process_func = lambda x, keep_empty: dataset.post_process(network.delete_empty_from_network_samples(x, device=device, keep_empty=keep_empty))
     save_states_func = SaveStates(process_func)
     
     print('class labels:', classes, len(classes))
@@ -281,10 +282,10 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
     if not cfg.evaluation.load_result:
         idx = 0
         predictions = []
-        for i in range(cfg.task.evaluator.n_synthesized_scenes//batch_size+1):
+        for i in range(len(dataset)):
             
             print("{} / {}:".format(
-                i, cfg.task.evaluator.n_synthesized_scenes//batch_size+1)
+                i, len(dataset) // batch_size)
             )
             # Get a floor plan
             room_lst = []
@@ -295,8 +296,12 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
             scene_id_lst = []
             room_outer_box_lst = []
             tr_floor_lst = []
-            for  j in range(batch_size):
-                scene_idx = np.random.choice(len(dataset))
+            for j in range(batch_size):
+                scene_idx = i*batch_size+j
+                if scene_idx > 2:
+                    break
+                if scene_idx >= len(dataset):
+                    break
                 # scene_idx = 525  #50 #525  #1610   #3454 #3921
                 print(j,scene_idx)
                 scene_idx_lst.append(scene_idx)
@@ -322,6 +327,8 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
                 floor_plan_centroid_list.append(current_scene.floor_plan_centroid)
                 floor_plan_centroid_batch_list.append(current_scene.floor_plan_centroid)
                 tr_floor_lst.append(tr_floor)
+            if len(scene_idx_lst) == 0:
+                break
             room_mask = torch.concat(room_lst)
             room_outer_box = torch.concat(room_outer_box_lst)
             bbox_params = network.generate_layout(
@@ -329,7 +336,7 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
                 room_outer_box=room_outer_box,
                 floor_plan=floor_plan_mask_batch_list, 
                 floor_plan_centroid=floor_plan_centroid_batch_list,
-                batch_size = batch_size,
+                batch_size = len(scene_idx_lst),
                 num_points=cfg.task["network"]["sample_num_points"],
                 point_dim=cfg.task["network"]["point_dim"],
                 text=torch.from_numpy(samples['desc_emb'])[None, :].to(device) if 'desc_emb' in samples.keys() else None,
@@ -789,45 +796,6 @@ def show_scene(boxes,objects_dataset,dataset,gapartnet_dataset,cfg,floor_plan_ls
                 # o3d.io.write_triangle_mesh(path_to_scene, whole_scene_mesh)
     return
 
-
-def get_textured_object_ids_based_on_objfeats(bbox_params_t, objects_dataset, classes, cfg):
-    models = []
-    class_num = cfg.task.dataset.class_num
-
-    for j in range(bbox_params_t.shape[1]):
-        query_label = classes[bbox_params_t[0, j, :class_num].argmax(-1)]  #TODO
-        
-        if query_label == 'empty':
-            continue
-            
-        translation = bbox_params_t[0, j, class_num:class_num+3]
-        query_size = bbox_params_t[0, j, class_num+3:class_num+6]
-        
-        theta = bbox_params_t[0, j, class_num+6]
-        query_objfeat = bbox_params_t[0, j, class_num+7:]
-        
-        furniture = objects_dataset.get_closest_furniture_to_objfeats_and_size(
-            query_label, query_objfeat, query_size
-        )
-        raw_bbox_vertices = np.load(furniture.path_to_bbox_vertices, mmap_mode="r") #np.array(raw_mesh.bounding_box.vertices)
-        raw_sizes = np.array([
-            np.sqrt(np.sum((raw_bbox_vertices[4]-raw_bbox_vertices[0])**2))/2,
-            np.sqrt(np.sum((raw_bbox_vertices[2]-raw_bbox_vertices[0])**2))/2,
-            np.sqrt(np.sum((raw_bbox_vertices[1]-raw_bbox_vertices[0])**2))/2
-        ])
-        scale = query_size / raw_sizes
-        
-        model_jid = (furniture.raw_model_path).split('/')[-2]
-        models.append((query_label, {
-            "model_jid": model_jid,
-            'left': translation[0].item(),
-            'top': translation[2].item(),
-            'depth': translation[1].item(),
-            "orientation": theta.item(),
-            "scale": scale.tolist(),
-        }))
-
-    return models
 
 def render_scene_all(boxes,objects_dataset,dataset,gapartnet_dataset,cfg,room_lst,
                         floor_plan_lst,floor_plan_mask_list,floor_plan_centroid_list,

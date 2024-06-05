@@ -358,7 +358,7 @@ class DiffusionSceneLayout_DDPM(Module):
             samples_dict["objfeats"] = samples[:, :, self.bbox_dim+self.class_dim:self.bbox_dim+self.class_dim+self.objfeat_dim]
 
         #initilization
-        B = batch_size
+        B = samples.size(0)
         boxes = {
             "objectness": torch.zeros(B, 0, 1, device=device),
             "class_labels": torch.zeros(B, 0, self.class_dim, device=device),

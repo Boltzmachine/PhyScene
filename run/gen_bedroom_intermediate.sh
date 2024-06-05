@@ -1,6 +1,6 @@
 save_dir=$1
 
-python scripts/eval/calc_ckl.py hydra/job_logging=none hydra/hydra_logging=none \
+python scripts/eval/gen_layout.py hydra/job_logging=none hydra/hydra_logging=none \
                 exp_dir=${save_dir} \
                 task=scene_bedroom \
                 task.network.room_mask_condition=true \
@@ -10,7 +10,7 @@ python scripts/eval/calc_ckl.py hydra/job_logging=none hydra/hydra_logging=none 
                 evaluation.overlap_type="rotated_bbox" \
                 evaluation.visual=true \
                 evaluation.render2img=true \
-                evaluation.save_walkable_map=true \
+                evaluation.save_walkable_map=false \
                 evaluation.without_floor=false \
                 evaluation.gapartnet=false \
                 evaluation.render_save_path="result_render/bedroom_w_guide" \

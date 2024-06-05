@@ -11,7 +11,7 @@ from PIL import Image
 import trimesh
 import math
 
-from datasets.gapartnet_dataset import MapThreedfuture2gparnet
+# from datasets.gapartnet_dataset import MapThreedfuture2gparnet
 
 from simple_3dviz import Mesh
 from simple_3dviz.renderables.textured_mesh import Material, TexturedMesh
@@ -453,3 +453,44 @@ def get_floor_plan(scene, floor_textures):
     )
 
     return floor, tr_floor
+
+
+
+def get_textured_object_ids_based_on_objfeats(bbox_params_t, objects_dataset, classes, cfg):
+    models = []
+    class_num = cfg.task.dataset.class_num
+
+    for j in range(bbox_params_t.shape[1]):
+        query_label = classes[bbox_params_t[0, j, :class_num].argmax(-1)]  #TODO
+        
+        if query_label == 'empty':
+            continue
+            
+        translation = bbox_params_t[0, j, class_num:class_num+3]
+        query_size = bbox_params_t[0, j, class_num+3:class_num+6]
+        
+        theta = bbox_params_t[0, j, class_num+6]
+        query_objfeat = bbox_params_t[0, j, class_num+7:]
+        
+        furniture = objects_dataset.get_closest_furniture_to_objfeats_and_size(
+            query_label, query_objfeat, query_size
+        )
+        raw_bbox_vertices = np.load(furniture.path_to_bbox_vertices, mmap_mode="r") #np.array(raw_mesh.bounding_box.vertices)
+        raw_sizes = np.array([
+            np.sqrt(np.sum((raw_bbox_vertices[4]-raw_bbox_vertices[0])**2))/2,
+            np.sqrt(np.sum((raw_bbox_vertices[2]-raw_bbox_vertices[0])**2))/2,
+            np.sqrt(np.sum((raw_bbox_vertices[1]-raw_bbox_vertices[0])**2))/2
+        ])
+        scale = query_size / raw_sizes
+        
+        model_jid = (furniture.raw_model_path).split('/')[-2]
+        models.append((query_label, {
+            "model_jid": model_jid,
+            'left': translation[0].item(),
+            'top': translation[2].item(),
+            'depth': translation[1].item(),
+            "orientation": theta.item(),
+            "scale": scale.tolist(),
+        }))
+
+    return models
