@@ -63,6 +63,8 @@ from utils.overlap import bbox_overlap, calc_overlap_rotate_bbox, calc_wall_over
 from scripts.eval.walkable_metric import cal_walkable_metric
 from scripts.eval.walkable_map_visual import walkable_map_visual
 
+from scripts.eval.gen_layout import RewardGuidance
+
 IMAGE_SIZE = 1024
 def map_scene_id(raw_dataset):
     mapping = dict()
@@ -125,68 +127,12 @@ def show_renderables(renderables):
         return
 
 
-class SaveStates:
-    def __init__(self, process_func):
-        self.process_func = process_func
-        self.output_directory = "data/reward_training1/"
-        os.makedirs(self.output_directory, exist_ok=True)
-        self.mesh_format = ".glb"
-
-    def __call__(self, scene_ids, xt, step):
-        assert (step[0] == step).all()
-        current_step = step[0].item()
-        if current_step % 1 != 0:
-            return
-        # for scene_id, xt_, class_labels, translations, sizes, angles, objfeats, t in zip(scene.scene_id, xt, box_params["class_labels"], box_params["translations"], box_params["sizes"], box_params["angles"], box_params["objfeats"], step):
-
-        for scene_id, xt_, t, in zip(scene_ids, xt, step):
-            output_directory = os.path.join(self.output_directory, scene_id, f"step{t.item():04d}")
-            os.makedirs(output_directory, exist_ok=True)
-
-            box_params_ = self.process_func(xt_.unsqueeze(0))
-
-            raw_path = os.path.join(output_directory, f"raw.pt")
-            torch.save(xt_, raw_path)
-            # bbox_params_t = torch.cat([
-            #     class_labels,
-            #     translations, # 3
-            #     sizes, # 3
-            #     angles # 1
-            # ], dim=-1).cpu().numpy()
-            # box_params_ = {
-            #     "class_labels": class_labels.cpu().numpy(),
-            #     "translations": translations.cpu().numpy(),
-            #     "sizes": sizes.cpu().numpy(),
-            #     "angles": angles.cpu().numpy(),
-            #     "objfeats": objfeats.cpu().numpy(),
-            # }
-            # renderables, trimesh_meshes, model_jids = get_textured_objects_based_on_objfeats(
-            #     bbox_params_t, objects_dataset, classes, diffusion=True, no_texture=False, query_objfeats=objfeats, 
-            # )
-            # trimesh_meshes += scene.tr_floor
-            npy_path = os.path.join(output_directory, f"box_params.npy")
-            np.save(npy_path, box_params_)
-        # # model_path = os.path.join(output_directory, f'model{self.mesh_format}')
-        # # image_path = os.path.join(output_directory, f'image.png')
-        # # info_path = os.path.join(output_directory, f'info.json')
-
-        # # whole_scene_mesh = trimesh.util.concatenate(trimesh_meshes)
-        # # whole_scene_mesh.export(model_path)
-        # # self.renderer.render_model(model_path, image_path)
-
-        # # info = {
-        # #     "scene_id": scene.scene_id.item(),
-        # #     "text": text,
-        # # }
-        # # json.dump(info, open(info_path, "w"))
-
-
 @hydra.main(version_base=None, config_path="../../configs", config_name="default")
 def main(cfg: DictConfig) -> None:
     
     global config
     config = cfg 
-    cfg.task.dataset = {**cfg.task.dataset,**cfg.dataset}
+    cfg.task.dataset = {**cfg.task.dataset, **cfg.dataset}
     weight_file = cfg.task.evaluator.weight_file
     os.environ["PATH_TO_SCENES"] = cfg.PATH_TO_SCENES
     os.environ["BASE_DIR"] = cfg.BASE_DIR
@@ -262,8 +208,6 @@ def main(cfg: DictConfig) -> None:
 
 def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
     classes = np.array(dataset.class_labels)
-    process_func = lambda x: dataset.post_process(network.delete_empty_from_network_samples(x, device=device, keep_empty=False))
-    save_states_func = SaveStates(process_func)
     
     print('class labels:', classes, len(classes))
     synthesized_scenes = []
@@ -331,14 +275,15 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
                 floor_plan_centroid=floor_plan_centroid_batch_list,
                 batch_size = batch_size,
                 num_points=cfg.task["network"]["sample_num_points"],
+         
                 point_dim=cfg.task["network"]["point_dim"],
                 text=torch.from_numpy(samples['desc_emb'])[None, :].to(device) if 'desc_emb' in samples.keys() else None,
                 device=device,
                 clip_denoised=cfg.clip_denoised,
                 batch_seeds=torch.arange(i, i+1),
-                keep_empty = True,
-                scene_id_lst = scene_id_lst,
-                save_states_func=save_states_func
+                keep_empty=True,
+                scene_id_lst=scene_id_lst,
+                reward_guidance=RewardGuidance(0.1)
             )
 
             boxes = dataset.post_process(bbox_params)
@@ -424,17 +369,17 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
     #                     tr_floor_lst,room_outer_box_lst,scene_id_lst,scene_idx_lst)
     # #collision rate
     # print("collision type", cfg.evaluation.overlap_type)
-    # if cfg.evaluation.overlap_type == "rotated_bbox":
-    #     overlap_ratio = calc_overlap_rotate_bbox(synthesized_scenes)
-    # else:    
-    #     #"bbox_no_direction", "mesh", "grid_for_depth"
-    #     overlap_ratio = calc_overlap(synthesized_scenes,classes,cfg)
-    # print(cfg.evaluation.jsonname)
-    # # print(overlap_ratio)
+    if cfg.evaluation.overlap_type == "rotated_bbox":
+        overlap_ratio = calc_overlap_rotate_bbox(synthesized_scenes)
+    else:    
+        #"bbox_no_direction", "mesh", "grid_for_depth"
+        overlap_ratio = calc_overlap(synthesized_scenes,classes,cfg)
+    print(cfg.evaluation.jsonname)
+    print(overlap_ratio)
 
-    # CKL, gt_class_labels, syn_class_labels = calc_CKL(synthesized_scenes,ground_truth_scenes,classes)
-    # print(cfg.evaluation.jsonname)
-    # print(CKL)
+    CKL, gt_class_labels, syn_class_labels = calc_CKL(synthesized_scenes,ground_truth_scenes,classes)
+    print(cfg.evaluation.jsonname)
+    print(CKL)
 
     # walkable_average_rate, accessable_rate,box_wall_rate = calc_wall_overlap(synthesized_scenes, floor_plan_mask_list, floor_plan_centroid_list, cfg, robot_real_width=0.3,classes=classes)
 

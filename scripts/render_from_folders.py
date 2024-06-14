@@ -37,8 +37,8 @@ config = None
 
 def match_for_each_scene(box_params_path):
     save_path = os.path.join(os.path.dirname(box_params_path), 'scene.json')
-    if os.path.exists(save_path):
-        return
+    # if os.path.exists(save_path):
+    #     return
     scene_id = re.search(r"/([^/]*[rR]oom-\d+)/", box_params_path).group(1)
     idx = scene_id_to_idx[scene_id]
     scene = raw_dataset[idx]
@@ -109,29 +109,31 @@ def main(cfg):
     all_paths = []
     for scene_dir in scene_dirs:
         step_dirs = os.listdir(os.path.join(args.dir, scene_dir))
-        # for step_dir in step_dirs:
-        step_dir = 'step0000'
+        for step_dir in step_dirs:
+        # step_dir = 'step0000'
+            # if step_dir != 'step0000':
+            #     continue
             # for cand_dir in os.listdir(os.path.join(args.dir, scene_dir, step_dir)):
-        box_params_path = os.path.join(args.dir, scene_dir, step_dir, 'box_params.npy')
-        all_paths.append(box_params_path)
+            box_params_path = os.path.join(args.dir, scene_dir, step_dir, 'box_params.npy')
+            all_paths.append(box_params_path)
 
 
-    # if args.num_workers > 1:
-    #     import multiprocessing
-    #     with multiprocessing.Pool(args.num_workers) as p:
-    #         list(tqdm(p.imap(match_for_each_scene, all_paths), total=len(all_paths)))
-    # else:
-    #     for box_params_path in tqdm(all_paths):
-    #         match_for_each_scene(box_params_path)
+    if args.num_workers > 1:
+        import multiprocessing
+        with multiprocessing.Pool(args.num_workers) as p:
+            list(tqdm(p.imap(match_for_each_scene, all_paths), total=len(all_paths)))
+    else:
+        for box_params_path in tqdm(all_paths):
+            match_for_each_scene(box_params_path)
     
-    for path in tqdm(all_paths):
-        path = os.path.join(os.path.dirname(path), 'scene.json')
-        print(path)
-        try:
-            renderer.render(json.load(open(path)), do_denormalize=False, file_name=os.path.join(os.path.dirname(path), 'render.png'))
-        except Exception as e:
-            print(e)
-            print('Failed to render', os.path.dirname(box_params_path))
+    # for path in tqdm(all_paths):
+    #     path = os.path.join(os.path.dirname(path), 'scene.json')
+    #     print(path)
+    #     try:
+    #         renderer.render(json.load(open(path)), do_denormalize=False, file_name=os.path.join(os.path.dirname(path), 'render.png'))
+    #     except Exception as e:
+    #         print(e)
+    #         print('Failed to render', os.path.dirname(box_params_path))
         
 if __name__ == "__main__":
     main()

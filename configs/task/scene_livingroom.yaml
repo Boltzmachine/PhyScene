@@ -42,6 +42,7 @@ dataset:
   use_normal: false
   room_side: 6.2
   dataset_filtering: threed_front_livingroom
+  dataset_directory: "data/preprocessed_data/LivingRoom/"
   dataset_type: "threedfront_objfeats_lat32"
   encoding_type: "diffusion_cosin_angle_objfeatsnorm_wocm_lat32" 
   annotation_file: "configs/data/livingroom_threed_front_splits.csv"

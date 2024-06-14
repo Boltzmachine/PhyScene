@@ -17,7 +17,7 @@ from simple_3dviz.renderables.textured_mesh import Material, TexturedMesh
 from simple_3dviz.behaviours.keyboard import SnapshotOnKey
 from simple_3dviz.behaviours.misc import LightToCamera
 import math
-from utils.open3d_vis_utils import draw_box_label
+# from utils.open3d_vis_utils import draw_box_label
 # from simple_3dviz.window import show
 
 

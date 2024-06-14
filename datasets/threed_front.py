@@ -11,7 +11,10 @@ from PIL import Image
 from .common import BaseDataset
 from .threed_front_scene import Room
 from .utils import parse_threed_front_scenes
-from utils.registry import Registry
+
+import sys
+sys.path.append('/ext/qiuweikang/LayoutPPT/')
+from third_party.PhyScene.utils.registry import Registry
 DATASET = Registry('Dataset')
 
 

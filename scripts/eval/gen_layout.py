@@ -19,6 +19,9 @@ import numpy as np
 import torch
 import json
 sys.path.insert(0, os.path.dirname(__file__) +"/../../")
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", '..', '..', '..'))
+from src.reward_model import RewardTrainingModule
+
 from utils.utils_preprocess import floor_plan_from_scene, room_outer_box_from_scene
 
 from datasets.base import filter_function, get_dataset_raw_and_encoded
@@ -63,6 +66,8 @@ from utils.overlap import bbox_overlap, calc_overlap_rotate_bbox, calc_wall_over
 
 from scripts.eval.walkable_metric import cal_walkable_metric
 from scripts.eval.walkable_map_visual import walkable_map_visual
+
+from renderer.blender import BlenderRenderer
 
 IMAGE_SIZE = 1024
 def map_scene_id(raw_dataset):
@@ -130,7 +135,8 @@ def show_renderables(renderables):
 class SaveStates:
     def __init__(self, process_func):
         self.process_func = process_func
-        self.output_directory = "data/reward_training1/"
+        self.renderer = BlenderRenderer()
+        self.output_directory = "data/debug/"
         os.makedirs(self.output_directory, exist_ok=True)
         self.mesh_format = ".glb"
         self.num_workers = 0
@@ -147,19 +153,13 @@ class SaveStates:
             box_params[k] = v[objectness < 0]
         npy_path = os.path.join(output_directory, f"box_params.npy")
         np.save(npy_path, box_params)
-        # model_path = os.path.join(output_directory, f'model{self.mesh_format}')
-        # image_path = os.path.join(output_directory, f'image.png')
-        # info_path = os.path.join(output_directory, f'info.json')
+        model_path = os.path.join(output_directory, f'model{self.mesh_format}')
+        image_path = os.path.join(output_directory, f'image.png')
+        info_path = os.path.join(output_directory, f'info.json')
 
-        # whole_scene_mesh = trimesh.util.concatenate(trimesh_meshes)
-        # whole_scene_mesh.export(model_path)
-        # self.renderer.render_model(model_path, image_path)
-
-        # info = {
-        #     "scene_id": scene.scene_id.item(),
-        #     "text": text,
-        # }
-        # json.dump(info, open(info_path, "w"))
+        whole_scene_mesh = trimesh.util.concatenate(trimesh_meshes)
+        whole_scene_mesh.export(model_path)
+        self.renderer.render_model(model_path, image_path)
 
 
     def __call__(self, scene_ids, xt, step):
@@ -181,6 +181,27 @@ class SaveStates:
             for args in zip(scene_ids, xt, box_params, step):
                 self.save(*args)
 
+
+class RewardGuidance:
+    def __init__(self, scale: float):
+        self.model = RewardTrainingModule.load_from_checkpoint(
+            os.path.join(os.path.dirname(__file__), '..', '..', '..', '..',
+            "logs/reward/kwu72wl2/checkpoints/epoch=4-step=505.ckpt"
+            # "logs/reward/iiwlefty/checkpoints/epoch=5-step=528.ckpt"
+            )).model
+        self.scale = scale
+    
+    @torch.enable_grad()
+    def __call__(self, xt, step):
+        box_params = xt
+        box_params = box_params.detach().requires_grad_(True)
+        reward = self.model(box_params, step).sum()
+        grad = torch.autograd.grad(reward, box_params)[0]
+
+        if step.sum() == 0:
+            print("final reward:", reward)
+        return grad * self.scale, reward
+    
 
 @hydra.main(version_base=None, config_path="../../configs", config_name="default")
 def main(cfg: DictConfig) -> None:
@@ -298,8 +319,9 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
             tr_floor_lst = []
             for j in range(batch_size):
                 scene_idx = i*batch_size+j
-                if scene_idx > 2:
+                if scene_idx > 50:
                     break
+
                 if scene_idx >= len(dataset):
                     break
                 # scene_idx = 525  #50 #525  #1610   #3454 #3921
@@ -345,7 +367,8 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
                 batch_seeds=torch.arange(i, i+1),
                 keep_empty = True,
                 scene_id_lst = scene_id_lst,
-                save_states_func=save_states_func
+                save_states_func=save_states_func,
+                # reward_guidance=RewardGuidance(0.02)
             )
 
             boxes = dataset.post_process(bbox_params)
@@ -984,12 +1007,12 @@ def sample_class_labels(class_labels):
 if __name__ == "__main__":
     import random
     import numpy as np
-    seed = 2027
-    torch.backends.cudnn.benchmark = False     
-    torch.backends.cudnn.deterministic = True
-    random.seed(seed)
-    np.random.seed(seed)
-    torch.manual_seed(seed)
-    torch.cuda.manual_seed(seed)
-    torch.cuda.manual_seed_all(seed)
+    # seed = 2027
+    # torch.backends.cudnn.benchmark = False     
+    # torch.backends.cudnn.deterministic = True
+    # random.seed(seed)
+    # np.random.seed(seed)
+    # torch.manual_seed(seed)
+    # torch.cuda.manual_seed(seed)
+    # torch.cuda.manual_seed_all(seed)
     main()

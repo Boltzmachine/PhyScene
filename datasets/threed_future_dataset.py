@@ -6,6 +6,7 @@ from .utils import parse_threed_future_models
 import torch
 from torch.utils.data import dataloader
 
+
 class ThreedFutureDataset(object):
     def __init__(self, objects):
         assert len(objects) > 0

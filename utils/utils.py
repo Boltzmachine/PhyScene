@@ -481,7 +481,7 @@ def get_textured_object_ids_based_on_objfeats(bbox_params_t, objects_dataset, cl
             np.sqrt(np.sum((raw_bbox_vertices[2]-raw_bbox_vertices[0])**2))/2,
             np.sqrt(np.sum((raw_bbox_vertices[1]-raw_bbox_vertices[0])**2))/2
         ])
-        scale = query_size / raw_sizes
+        scale = (query_size / raw_sizes).tolist()
         
         model_jid = (furniture.raw_model_path).split('/')[-2]
         models.append((query_label, {
@@ -490,7 +490,7 @@ def get_textured_object_ids_based_on_objfeats(bbox_params_t, objects_dataset, cl
             'top': translation[2].item(),
             'depth': translation[1].item(),
             "orientation": theta.item(),
-            "scale": scale.tolist(),
+            "scale": scale,
         }))
 
     return models

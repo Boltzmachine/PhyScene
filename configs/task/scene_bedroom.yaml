@@ -6,10 +6,10 @@ train:
   splits: ["train", "val"]
   batch_size: 128
   num_workers: 4
-  num_epochs: 6000
+  num_epochs: 60000
   log_step: 100
   log_epoch: 1
-  save_frequency: 200
+  save_frequency: 2000
   max_grad_norm: 10
   # optimizer
   optimizer: Adam

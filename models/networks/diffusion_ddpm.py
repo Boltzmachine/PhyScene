@@ -84,6 +84,7 @@ def get_betas(schedule_type, b_start, b_end, time_num):
     else:
         raise NotImplementedError(schedule_type)
     return betas
+        
 
 '''
 models
@@ -315,7 +316,13 @@ class GaussianDiffusion:
 
         objectness = model_mean[:,:,self.bbox_dim+self.class_dim-1:self.bbox_dim+self.class_dim]<0
         
-        # kwargs["save_states_func"](kwargs['scene_id_lst'], model_mean, t)
+        if save_state_func := kwargs.get("save_states_func", None):
+            save_state_func(kwargs['scene_id_lst'], model_mean, t)
+
+        
+        if reward_guidance := kwargs.get("reward_guidance", None):
+            reward_gradient, _ = reward_guidance(model_mean, t)
+
         if self.optimizer is not None and t[0]<10:
             print("guidance on timestep "+str(int(t[0])))
             ## openai guided diffusion uses the input x to compute gradient, see
@@ -325,8 +332,11 @@ class GaussianDiffusion:
             gradient = self.optimizer.gradient(model_mean, data, model_variance, room_outer_box=room_outer_box, floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid, objectness=objectness)
             a2 = time.time()
             print("guidance time consumption : ", a2-a1)
+
             if gradient is not None:
                 model_mean = model_mean + gradient
+        if reward_guidance is not None:
+            model_mean = model_mean + reward_gradient        
 
         sample = model_mean + nonzero_mask * torch.exp(0.5 * model_log_variance) * noise
         assert sample.shape == pred_xstart.shape
@@ -342,7 +352,8 @@ class GaussianDiffusion:
         assert isinstance(shape, (tuple, list))
         img_t = noise_fn(size=shape, dtype=torch.float, device=device)
         k_samples = []
-        for t in reversed(trange(0, self.num_timesteps if not keep_running else len(self.betas))):
+        num_steps = self.num_timesteps if not keep_running else len(self.betas)
+        for t in tqdm(reversed(range(0, num_steps)), total=num_steps):
             t_ = torch.empty(shape[0], dtype=torch.int64, device=device).fill_(t)
             img_t, xstart = self.p_sample(denoise_fn=denoise_fn, data=img_t,t=t_, room_outer_box=room_outer_box,  
                                           floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid,
