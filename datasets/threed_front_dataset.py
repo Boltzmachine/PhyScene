@@ -687,7 +687,7 @@ class Jitter(DatasetDecoratorBase):
         return sample_params
 
 
-class  Permutation(DatasetDecoratorBase):
+class Permutation(DatasetDecoratorBase):
     def __init__(self, dataset, permutation_keys, permutation_axis=0):
         super().__init__(dataset)
         self._permutation_keys = permutation_keys
@@ -1117,7 +1117,7 @@ def dataset_encoding_factory(
         angles = AngleEncoder(box_ordered_dataset)
         # objfeats = ObjFeatEncoder(box_ordered_dataset)
         objfeats_32 = ObjFeat32Encoder(box_ordered_dataset)
-        objfeats_pc_ulip = ObjFeatPcdULIP512Encoder(box_ordered_dataset)
+        # objfeats_pc_ulip = ObjFeatPcdULIP512Encoder(box_ordered_dataset)
         # room_outer_boxes = RoomOuterBoxEncoder(box_ordered_dataset)
 
         dataset_collection = DatasetCollection(

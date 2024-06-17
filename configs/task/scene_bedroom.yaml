@@ -47,8 +47,8 @@ dataset:
   room_side: 3.1
   dataset_filtering: threed_front_bedroom
   dataset_directory: "data/preprocessed_data/BedRoom/"
-  dataset_type: "threedfront_objfeats_lat32"
-  encoding_type: "diffusion_cosin_angle_objfeatsnorm_wocm_lat32" 
+  dataset_type: "cached_threedfront_objfeats_lat32"
+  encoding_type: "cached_diffusion_cosin_angle_objfeatsnorm_wocm_lat32" 
   annotation_file: "configs/data/bedroom_threed_front_splits.csv"
   path_to_invalid_scene_ids: "configs/data/invalid_threed_front_rooms.txt"
   path_to_invalid_bbox_jids: "configs/data/black_list.txt"
