@@ -5,7 +5,7 @@ path_to_pickled_3d_futute_models: "data/pickled_data/threed_future_model_bedroom
 train:
   splits: ["train", "val"]
   batch_size: 128
-  num_workers: 4
+  num_workers: 0
   num_epochs: 60000
   log_step: 100
   log_epoch: 1
@@ -47,8 +47,8 @@ dataset:
   room_side: 3.1
   dataset_filtering: threed_front_bedroom
   dataset_directory: "data/preprocessed_data/BedRoom/"
-  dataset_type: "cached_threedfront_objfeats_lat32"
-  encoding_type: "cached_diffusion_cosin_angle_objfeatsnorm_wocm_lat32" 
+  dataset_type: "threedfront_objfeats_lat32"
+  encoding_type: "diffusion_cosin_angle_objfeatsnorm_wocm_lat32" 
   annotation_file: "configs/data/bedroom_threed_front_splits.csv"
   path_to_invalid_scene_ids: "configs/data/invalid_threed_front_rooms.txt"
   path_to_invalid_bbox_jids: "configs/data/black_list.txt"
@@ -120,6 +120,9 @@ network:
     # class_condition: false
     # class_emb_dim: 128
 
+    room_arrange_condition: true
+    arrange_emb_dim: 384
+
     # diffusion config
     diffusion_kwargs:
         schedule_type: 'linear'
@@ -136,16 +139,25 @@ network:
     net_kwargs:
         dim: 512
         dim_mults: [1, 1, 1, 1]
-        channels: 62 
+        channels: 5
         objectness_dim: 0
         class_dim: 22
         angle_dim: 2
         objfeat_dim: 32
-        context_dim: 512 #128
-        instanclass_dim: 128 
-        seperate_all: true  # separate all
-        #self_condition: true
+        context_dim: 512
+        instanclass_dim: 512 #128 + 384
+        self_condition: true
         # merge_bbox: true 
-        # modulate_time_context_instanclass: true
+        modulate_time_context_instanclass: true
 
-guidance: null
+guidance:
+  checkpoint: logs/reward/f9wrf48v/checkpoints/epoch=1-step=128.ckpt
+  # checkpoint: "logs/reward/n3e60gt1/checkpoints/epoch=375-step=25192.ckpt"
+  # checkpoint: "logs/reward/p08kpzq3/checkpoints/epoch=3-step=268.ckpt"
+  # checkpoint: "logs/reward/cb0o80og/checkpoints/epoch=9-step=390.ckpt" #only step < 10 for train
+  # checkpoint: "logs/reward/cjdw2oqu/checkpoints/epoch=18-step=798.ckpt" #only step < 10, 0.1 > 10 resampled
+  scale: 0.00
+
+generation:
+  save_intermediate: true
+  save_path: "default"

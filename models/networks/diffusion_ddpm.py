@@ -187,6 +187,15 @@ class GaussianDiffusion:
         self.posterior_mean_coef1 = betas * torch.sqrt(alphas_cumprod_prev) / (1. - alphas_cumprod)
         self.posterior_mean_coef2 = (1. - alphas_cumprod_prev) * torch.sqrt(alphas) / (1. - alphas_cumprod)
 
+        snr = alphas_cumprod / (1 - alphas_cumprod)
+        if model_mean_type == 'eps':
+            loss_weight = torch.ones_like(snr)
+        elif model_mean_type == 'x0':
+            loss_weight = snr
+        elif model_mean_type == 'v':
+            loss_weight = snr / (snr + 1)
+        self.loss_weight = loss_weight
+
         self.optimizer = None
         self.room_outer_box = None
 
@@ -303,7 +312,7 @@ class GaussianDiffusion:
 
     ''' samples '''
 
-    def p_sample(self, denoise_fn, data, t, condition, condition_cross, noise_fn, room_outer_box=None, floor_plan=None, floor_plan_centroid=None, clip_denoised=False, return_pred_xstart=False, **kwargs):
+    def p_sample(self, denoise_fn, data, t, condition, condition_cross, noise_fn, room_outer_box=None, floor_plan=None, floor_plan_centroid=None, clip_denoised=False, return_pred_xstart=False, input_boxes=None, **kwargs):
         """
         Sample from the model
         """
@@ -314,11 +323,13 @@ class GaussianDiffusion:
         # no noise when t == 0
         nonzero_mask = torch.reshape(1 - (t == 0).float(), [data.shape[0]] + [1] * (len(data.shape) - 1))
 
-        objectness = model_mean[:,:,self.bbox_dim+self.class_dim-1:self.bbox_dim+self.class_dim]<0
-        
-        if save_state_func := kwargs.get("save_states_func", None):
-            save_state_func(kwargs['scene_id_lst'], model_mean, t)
+        if input_boxes is None:
+            objectness = model_mean[:,:,self.bbox_dim+self.class_dim-1:self.bbox_dim+self.class_dim]<0
+        else:
+            objectness = input_boxes[:,:,self.bbox_dim+self.class_dim-1:self.bbox_dim+self.class_dim]<0
 
+        if save_state_func := kwargs.get("save_states_func", None):
+            save_state_func(kwargs['scene_lst'], model_mean, t, input_boxes=input_boxes)
         
         if reward_guidance := kwargs.get("reward_guidance", None):
             reward_gradient, _ = reward_guidance(model_mean, t)
@@ -329,13 +340,13 @@ class GaussianDiffusion:
             ## https://github.com/openai/guided-diffusion/blob/22e0df8183507e13a7813f8d38d51b072ca1e67c/guided_diffusion/gaussian_diffusion.py#L436
             ## But the original formular uses the computed mean?
             a1 = time.time()
-            gradient = self.optimizer.gradient(model_mean, data, model_variance, room_outer_box=room_outer_box, floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid, objectness=objectness)
+            gradient = self.optimizer.gradient(model_mean, data, model_variance, room_outer_box=room_outer_box, floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid, objectness=objectness, input_boxes=input_boxes)
             a2 = time.time()
             print("guidance time consumption : ", a2-a1)
 
             if gradient is not None:
                 model_mean = model_mean + gradient
-        if reward_guidance is not None:
+        if reward_guidance is not None:# and t[0]<10:
             model_mean = model_mean + reward_gradient        
 
         sample = model_mean + nonzero_mask * torch.exp(0.5 * model_log_variance) * noise
@@ -426,6 +437,36 @@ class GaussianDiffusion:
         assert imgs[-1].shape == shape
         return imgs
 
+    def p_sample_loop_arrange(self, denoise_fn, shape, device, condition, condition_cross,
+                      noise_fn=torch.randn, clip_denoised=True, keep_running=False, input_boxes=None, **kwargs):
+        """
+        Arrangement: complete other properies based on some propeties
+        keep_running: True if we run 2 x num_timesteps, False if we just run num_timesteps
+
+        """
+
+        assert isinstance(shape, (tuple, list))
+        img_t = noise_fn(size=(shape[0], shape[1], self.translation_dim+self.angle_dim), dtype=torch.float, device=device)
+        for t in reversed(range(0, self.num_timesteps if not keep_running else len(self.betas))):
+            t_ = torch.empty(shape[0], dtype=torch.int64, device=device).fill_(t)
+
+            # reverse diffusion
+            img_t = self.p_sample(denoise_fn=denoise_fn, data=img_t,t=t_, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
+                                clip_denoised=clip_denoised, return_pred_xstart=False, input_boxes=input_boxes, **kwargs)
+            if t == 0:
+                print('last:', t, self.num_timesteps, len(self.betas))
+                img_t_trans = img_t[:, :, 0:self.translation_dim]
+                img_t_angle = img_t[:, :, self.translation_dim:] 
+                
+                input_boxes_trans = input_boxes[:, :, 0:self.translation_dim]
+                input_boxes_size  = input_boxes[:, :, self.translation_dim:self.translation_dim+self.size_dim]  
+                input_boxes_angle = input_boxes[:, :, self.translation_dim+self.size_dim:self.bbox_dim] 
+                input_boxes_other = input_boxes[:, :, self.bbox_dim:] 
+                img_t = torch.cat([ img_t_trans, input_boxes_size, img_t_angle, input_boxes_other ], dim=-1).contiguous()
+
+        assert img_t.shape == shape
+        return img_t
+
 
     '''losses'''
 
@@ -438,7 +479,7 @@ class GaussianDiffusion:
 
         return (kl, pred_xstart) if return_pred_xstart else kl
 
-    def p_losses(self, denoise_fn, data_start, t, noise=None, condition=None, condition_cross=None):
+    def p_losses(self, denoise_fn, data_start, t, noise=None, condition=None, condition_cross=None, return_targets=False, data_t=None):
         """
         Training loss calculation
         """
@@ -454,12 +495,14 @@ class GaussianDiffusion:
             noise = torch.randn(data_start.shape, dtype=data_start.dtype, device=data_start.device)
         assert noise.shape == data_start.shape and noise.dtype == data_start.dtype
 
-        data_t = self.q_sample(x_start=data_start, t=t, noise=noise)
+        if data_t is None:
+            data_t = self.q_sample(x_start=data_start, t=t, noise=noise)
 
         if self.loss_type == 'mse':
             if self.model_mean_type == 'eps':
                 target = noise
             elif self.model_mean_type == 'x0':
+                raise
                 target = data_start
             else:
                 raise NotImplementedError
@@ -474,7 +517,21 @@ class GaussianDiffusion:
             assert denoise_out.shape == data_start.shape
             #losses = ((target - denoise_out)**2).mean(dim=list(range(1, len(data_start.shape))))
 
-            if data_start.shape[-1] == self.objectness_dim+self.class_dim+self.bbox_dim+self.objfeat_dim:
+            if self.room_arrange_condition:
+                assert data_start.shape[-1] == self.translation_dim + self.angle_dim
+                loss_trans = ((target[:, :, 0:self.translation_dim]  - denoise_out[:, :, 0:self.translation_dim])**2).mean(dim=list(range(1, len(data_start.shape))))
+                loss_angle = ((target[:, :, self.translation_dim:]  - denoise_out[:, :, self.translation_dim:])**2).mean(dim=list(range(1, len(data_start.shape))))
+                if self.loss_separate:
+                    losses = loss_trans + loss_angle
+                else:
+                    losses = ((target - denoise_out)**2).mean(dim=list(range(1, len(data_start.shape))))
+                losses_weight = losses * self._extract(self.loss_weight.to(losses.device), t, losses.shape).to(losses.device)
+                return losses_weight, {
+                    'loss.trans': loss_trans.mean(),
+                    'loss.angle': loss_angle.mean(),
+                }
+
+            elif data_start.shape[-1] == self.objectness_dim+self.class_dim+self.bbox_dim+self.objfeat_dim:
                 loss_trans = ((target[:, :, 0:self.translation_dim]  - denoise_out[:, :, 0:self.translation_dim])**2).mean(dim=list(range(1, len(data_start.shape))))
                 loss_size  = ((target[:, :, self.translation_dim:self.translation_dim+self.size_dim]  - denoise_out[:, :, self.translation_dim:self.translation_dim+self.size_dim])**2).mean(dim=list(range(1, len(data_start.shape))))
                 loss_angle = ((target[:, :, self.translation_dim+self.size_dim:self.bbox_dim]  - denoise_out[:, :, self.translation_dim+self.size_dim:self.bbox_dim])**2).mean(dim=list(range(1, len(data_start.shape))))
@@ -499,7 +556,7 @@ class GaussianDiffusion:
                         losses += loss_objfeat
                 else:
                     losses = ((target - denoise_out)**2).mean(dim=list(range(1, len(data_start.shape))))
-                    
+                
                 if self.loss_iou:
                     # get x_recon & valid mask 
                     if self.model_mean_type == 'eps':
@@ -545,7 +602,7 @@ class GaussianDiffusion:
                     'loss.object': loss_object.mean(),
                     'loss.objfeat': loss_objfeat.mean(),
                     'loss.liou': loss_iou_valid_avg.mean(), 
-                    'loss.bbox_iou': bbox_iou_valid_avg.mean(), 
+                    'loss.bbox_iou': bbox_iou_valid_avg.mean(),
                 }
             else:
                 print('unimplement point dim is: ', data_start.shape[-1])
@@ -663,11 +720,11 @@ class DiffusionPoint(nn.Module):
         assert t.shape == torch.Size([B]) and t.dtype == torch.int64
 
         out = self.model(data, t, condition, condition_cross)
-        
+
         assert out.shape == torch.Size([B, D, N])
         return out
 
-    def get_loss_iter(self, data, noises=None, condition=None, condition_cross=None):
+    def get_loss_iter(self, data, noises=None, condition=None, condition_cross=None, return_targets=False):
         
         if len(data.shape) == 3:
             B, D, N = data.shape
@@ -679,7 +736,7 @@ class DiffusionPoint(nn.Module):
             noises[t!=0] = torch.randn((t!=0).sum(), *noises.shape[1:]).to(noises)
 
         losses, loss_dict = self.diffusion.p_losses(
-            denoise_fn=self._denoise, data_start=data, t=t, noise=noises, condition=condition, condition_cross=condition_cross)
+            denoise_fn=self._denoise, data_start=data, t=t, noise=noises, condition=condition, condition_cross=condition_cross, return_targets=return_targets)
         assert losses.shape == t.shape == torch.Size([B])
         return losses.mean(), loss_dict
     
@@ -695,3 +752,16 @@ class DiffusionPoint(nn.Module):
         return self.diffusion.p_sample_loop_trajectory(self._denoise, shape=shape, device=device, condition=condition, condition_cross=condition_cross, room_outer_box=room_outer_box, noise_fn=noise_fn, freq=freq,
                                                        clip_denoised=clip_denoised,
                                                        keep_running=keep_running)
+    
+    def complete_samples(self, shape, device, condition=None, condition_cross=None, noise_fn=torch.randn,
+                    clip_denoised=True, keep_running=False, partial_boxes=None):
+        return self.diffusion.p_sample_loop_complete(self._denoise, shape=shape, device=device, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
+                                            clip_denoised=clip_denoised,
+                                            keep_running=keep_running, partial_boxes=partial_boxes)
+
+    def arrange_samples(self, shape, device, condition=None, condition_cross=None, noise_fn=torch.randn,
+                    clip_denoised=True, keep_running=False, input_boxes=None, **kwargs):
+        
+        return self.diffusion.p_sample_loop_arrange(self._denoise, shape=shape, device=device, condition=condition, condition_cross=condition_cross, noise_fn=noise_fn,
+                                            clip_denoised=clip_denoised,
+                                            keep_running=keep_running, input_boxes=input_boxes, **kwargs)

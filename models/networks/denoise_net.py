@@ -350,7 +350,6 @@ class Unet1D(nn.Module):
         num_resolutions = len(in_out)
 
 
-
         for ind, (dim_in, dim_out) in enumerate(in_out):
             is_last = ind >= (num_resolutions - 1)
             self.downs.append(nn.ModuleList([
@@ -451,7 +450,6 @@ class Unet1D(nn.Module):
         if context_cross is not None:
             # [B, N, C] --> [B, C, N]
             context_cross = torch.permute(context_cross, (0, 2, 1)).contiguous()
-
         x = self.init_conv(x)
         r = x.clone()
 

@@ -66,6 +66,7 @@ from utils.overlap import bbox_overlap, calc_overlap_rotate_bbox, calc_wall_over
 
 from scripts.eval.walkable_metric import cal_walkable_metric
 from scripts.eval.walkable_map_visual import walkable_map_visual
+from scripts.eval.gen_layout import SaveStates, RewardGuidance
 
 # from renderer.blender import BlenderRenderer
 
@@ -132,80 +133,9 @@ def show_renderables(renderables):
 
 
 
-class SaveStates:
-    def __init__(self, save_path: str, process_func):
-        self.process_func = process_func
-        # self.renderer = BlenderRenderer()
-        self.output_directory = save_path
-        os.makedirs(self.output_directory, exist_ok=True)
-        self.mesh_format = ".glb"
-        self.num_workers = 0
-
-    def save(self, scene, xt, box_params, t):
-        output_directory = os.path.join(self.output_directory, scene.uid, f"step{t.item():04d}")
-        os.makedirs(output_directory, exist_ok=True)
-
-        raw_path = os.path.join(output_directory, f"raw.pt")
-        torch.save(xt, raw_path)
-        # trimesh_meshes += scene.tr_floor
-        objectness = box_params.pop("objectness").squeeze(-1)
-        for k, v in box_params.items():
-            box_params[k] = v[objectness < 0]
-        npy_path = os.path.join(output_directory, f"box_params.npy")
-        np.save(npy_path, box_params)
-        # model_path = os.path.join(output_directory, f'model{self.mesh_format}')
-        # image_path = os.path.join(output_directory, f'image.png')
-        # info_path = os.path.join(output_directory, f'info.json')
-
-        # whole_scene_mesh = trimesh.util.concatenate(trimesh_meshes)
-        # whole_scene_mesh.export(model_path)
-        # self.renderer.render_model(model_path, image_path)
-
-
-    def __call__(self, scenes, xt, step, input_boxes=None):
-        assert (step[0] == step).all()
-        current_step = step[0].item()
-        if current_step % 1 != 0:
-            return
-        # for scene_id, xt_, class_labels, translations, sizes, angles, objfeats, t in zip(scene.scene_id, xt, box_params["class_labels"], box_params["translations"], box_params["sizes"], box_params["angles"], box_params["objfeats"], step):
-        # for args in zip(scene_ids, xt, step):
-        #     self.save(*args)
-        bs = len(scenes)
-        box_params = self.process_func(xt, True, input_boxes=input_boxes)
-        box_params = [{k: v[j] for k, v in box_params.items()} for j in range(bs)]
-
-        if self.num_workers > 1:
-            with multiprocess.Pool(self.num_workers) as p:
-                p.starmap(self.save, zip(scenes, xt, box_params, step))
-        else:
-            for args in zip(scenes, xt, box_params, step):
-                self.save(*args)
-
-
-class RewardGuidance:
-    def __init__(self, cfg):
-        self.model = RewardTrainingModule.load_from_checkpoint(
-            os.path.join(os.path.dirname(__file__), '..', '..', '..', '..',
-            cfg.task.guidance.checkpoint,
-            ), 
-            map_location=torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            ).model
-        self.scale = cfg.task.guidance.scale
-    
-    @torch.enable_grad()
-    def __call__(self, xt, step):
-        box_params = xt
-        box_params = box_params.detach().requires_grad_(True)
-        reward = self.model(box_params, step).sum()
-        grad = torch.autograd.grad(reward, box_params)[0]
-
-        if step.sum() == 0:
-            print("final reward:", reward)
-        return grad * self.scale, reward
-    
-
 @hydra.main(version_base=None, config_path="../../configs", config_name="default")
 def main(cfg: DictConfig) -> None:
+    
     global config
     config = cfg 
     cfg.task.dataset = {**cfg.task.dataset,**cfg.dataset}
@@ -286,12 +216,13 @@ def main(cfg: DictConfig) -> None:
 def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
     classes = np.array(dataset.class_labels)
     process_func = lambda x, keep_empty: dataset.post_process(network.delete_empty_from_network_samples(x, device=device, keep_empty=keep_empty))
+    save_states_func = SaveStates(cfg.task.generation.save_path, process_func)
     
     print('class labels:', classes, len(classes))
     synthesized_scenes = []
     floor_plan_mask_list = []
     floor_plan_centroid_list = []
-    batch_size = min(cfg.task.test.batch_size, cfg.task.evaluator.n_synthesized_scenes)
+    batch_size = cfg.task.test.batch_size
     mapping = map_scene_id(raw_dataset)
 
     # if cfg.evaluation.visual:
@@ -303,8 +234,8 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
     if not cfg.evaluation.load_result:
         idx = 0
         predictions = []
-        total = min(cfg.task.evaluator.n_synthesized_scenes, len(dataset))
-        total_batch = (total - 1) // batch_size + 1
+        total = len(dataset)
+        total_batch = total // batch_size + 1
         for i in range(total_batch):
             print("{} / {}:".format(
                 i, total_batch)
@@ -319,11 +250,10 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
             scene_lst = []
             room_outer_box_lst = []
             tr_floor_lst = []
-            for j in range(min(batch_size, total - i*batch_size)):
+            for j in range(min(batch_size, len(dataset) - i*batch_size)):
                 scene_idx = i*batch_size+j
                 if scene_idx >= len(dataset):
                     break
-                print(scene_idx)
                 # scene_idx = 525  #50 #525  #1610   #3454 #3921
                 print(j,scene_idx)
                 scene_idx_lst.append(scene_idx)
@@ -354,7 +284,6 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
                 continue
             room_mask = torch.concat(room_lst)
             room_outer_box = torch.concat(room_outer_box_lst)
-
             bbox_params = network.generate_layout(
                 room_mask=room_mask.to(device),
                 room_outer_box=room_outer_box,
@@ -370,8 +299,8 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
                 keep_empty = True,
                 scene_id_lst = scene_id_lst,
                 scene_lst = scene_lst,
-                # save_states_func=save_states_func,
-                reward_guidance=RewardGuidance(cfg) if cfg.task.guidance else None
+                save_states_func=save_states_func,
+                # reward_guidance=RewardGuidance(cfg)
             )
 
             boxes = dataset.post_process(bbox_params)
@@ -398,7 +327,7 @@ def evaluate(network,dataset,cfg,raw_dataset, ground_truth_scenes, device):
             result["objfeats_32"] = np.concatenate([boxes["objfeats_32"] for boxes in boxes_save],axis = 0).tolist()
             result["objectness"] = np.concatenate([boxes["objectness"] for boxes in boxes_save],axis = 0).tolist()
             result["scene_ids"] = scene_id_save
-            out_file = open(cfg.evaluation.jsonname, "w")
+            out_file = open(cfg.evaluation.jsonname, "w")        
             json.dump(result, out_file, indent = 4)
             out_file.close()
             # sys.exit()

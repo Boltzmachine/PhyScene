@@ -5,7 +5,7 @@ hydra:
 
 defaults:
   - _self_
-  - task: scene_bedroom
+  - task: scene_livingroom
   - optimizer: null
 
 output_dir: outputs
@@ -85,3 +85,4 @@ evaluation:
   save_mesh: false
   save_walkable_map: false
   render_save_path: "result_render/debug"
+  save_intermediate: false

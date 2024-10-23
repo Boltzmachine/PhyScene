@@ -206,7 +206,6 @@ class DiffusionSceneLayout_DDPM(Module):
             arrange_condition_f = self.fc_arrange_condition(arrange_input)
             condition = torch.cat([condition, arrange_condition_f], dim=-1).contiguous()
             room_layout_target  = torch.cat([ room_layout_target[:, :, 0:self.translation_dim], room_layout_target[:, :, self.translation_dim+self.size_dim:self.bbox_dim] ], dim=-1).contiguous()
-
         # use text embed for cross attention
         if self.text_condition:
             if self.text_glove_embedding:
@@ -287,7 +286,6 @@ class DiffusionSceneLayout_DDPM(Module):
             arrange_condition_f = self.fc_arrange_condition(arrange_input)
             condition = torch.cat([condition, arrange_condition_f], dim=-1).contiguous()
 
-
         if self.text_condition:
             if self.text_glove_embedding:
                 condition_cross = self.fc_text_f(text) #sample_params["desc_emb"]
@@ -304,18 +302,27 @@ class DiffusionSceneLayout_DDPM(Module):
             condition_cross = None
             
 
-        print('unconditional / conditional generation sampling')
-        # reverse sampling
-        if ret_traj:
-            samples = self.diffusion.gen_sample_traj(noise.shape, room_mask.device, freq=freq, room_outer_box=room_outer_box, condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised, **kwargs)
+        if input_boxes is not None:
+            print('scene arrangement sampling')
+            samples = self.diffusion.arrange_samples(noise.shape, room_mask.device, condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised, input_boxes=input_boxes, **kwargs)
+
+        elif partial_boxes is not None:
+            print('scene completion sampling')
+            samples = self.diffusion.complete_samples(noise.shape, room_mask.device, condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised, partial_boxes=partial_boxes)
+
         else:
-            import time
-            t0 = time.time()
-            samples = self.diffusion.gen_samples(noise.shape, room_mask.device, room_outer_box=room_outer_box,
-                                                 floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid,
-                                                 condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised, **kwargs)
-            t1 = time.time()
-            # print(t1-t0)
+            print('unconditional / conditional generation sampling')
+            # reverse sampling
+            if ret_traj:
+                samples = self.diffusion.gen_sample_traj(noise.shape, room_mask.device, freq=freq, room_outer_box=room_outer_box, condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised, **kwargs)
+            else:
+                import time
+                t0 = time.time()
+                samples = self.diffusion.gen_samples(noise.shape, room_mask.device, room_outer_box=room_outer_box,
+                                                    floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid,
+                                                    condition=condition, condition_cross=condition_cross, clip_denoised=clip_denoised, **kwargs)
+                t1 = time.time()
+                # print(t1-t0)
         return samples
 
     @torch.no_grad()
@@ -326,6 +333,15 @@ class DiffusionSceneLayout_DDPM(Module):
                               text=text, ret_traj=ret_traj, ddim=ddim, clip_denoised=clip_denoised, batch_seeds=batch_seeds, **kwargs)
         
         return self.delete_empty_from_network_samples(samples, device=device, keep_empty=keep_empty, batch_size = batch_size)
+    
+    @torch.no_grad()
+    def arrange_scene(self, room_mask, num_points, point_dim, input_boxes, room_outer_box=None, floor_plan=None, floor_plan_centroid=None, batch_size=1, text=None, ret_traj=False, ddim=False, clip_denoised=False, batch_seeds=None, device="cpu", keep_empty=False, **kwargs):
+        
+        samples = self.sample(room_mask, num_points, point_dim, batch_size, input_boxes=input_boxes, room_outer_box=room_outer_box,
+                              floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid,
+                              text=text, ret_traj=ret_traj, ddim=ddim, clip_denoised=clip_denoised, batch_seeds=batch_seeds, **kwargs)
+
+        return self.delete_empty_from_network_samples(samples, device=device, keep_empty=keep_empty)
 
     @torch.no_grad()
     def generate_layout_progressive(self, room_mask, room_outer_box, num_points, point_dim, batch_size=1, text=None, ret_traj=False, ddim=False, clip_denoised=False, batch_seeds=None, device="cpu", keep_empty=False, num_step=100):
@@ -443,7 +459,7 @@ class DiffusionSceneLayout_DDPM(Module):
                 "sizes": boxes["sizes"].to("cpu"),
                 "angles": boxes["angles"].to("cpu"),
             }
-
+            
 def train_on_batch(model, optimizer, sample_params, config):
     # Make sure that everything has the correct size
     optimizer.zero_grad()

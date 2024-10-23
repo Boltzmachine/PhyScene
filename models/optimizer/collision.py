@@ -330,7 +330,7 @@ class CollisionOptimizer(Optimizer):
                 loss_room_outer += cal_iou_3d(bbox_outer_cur,bbox_target).sum()/len(bbox)/bbox_cur_cnt #1,12
         return loss_room_outer
 
-    def optimize(self, x: torch.Tensor, data, room_outer_box=None, doors=None, floor_plan=None, floor_plan_centroid=None, objectness=None) -> torch.Tensor:
+    def optimize(self, x: torch.Tensor, data, room_outer_box=None, doors=None, floor_plan=None, floor_plan_centroid=None, objectness=None, input_boxes=None) -> torch.Tensor:
 
         """ Compute gradient for optimizer constraint
 
@@ -343,7 +343,7 @@ class CollisionOptimizer(Optimizer):
         """
         
         ### iou loss
-        boxes = self.post_process(x) #post processed data
+        boxes = self.post_process(x, input_boxes=input_boxes) #post processed data
 
         class_labels = boxes["class_labels"]
         translations = boxes["translations"]
@@ -628,7 +628,18 @@ class CollisionOptimizer(Optimizer):
             loss_walkable += cal_iou_3d(torch.tensor(bbox_path,device=bbox_target.device,dtype=bbox_target.dtype),bbox_target).sum()/len(bbox)/bbox_floor_cur_cnt
         return loss_walkable
 
-    def post_process(self, pred_x):
+    def post_process(self, pred_x, input_boxes=None):
+        if input_boxes is not None:
+            self.translation_dim = 3
+            pred_x_trans = pred_x[:, :, 0:self.translation_dim]
+            pred_x_angle = pred_x[:, :, self.translation_dim:] 
+            
+            input_boxes_trans = input_boxes[:, :, 0:self.translation_dim]
+            input_boxes_size  = input_boxes[:, :, self.translation_dim:self.translation_dim+self.d_shape]  
+            input_boxes_angle = input_boxes[:, :, self.translation_dim+self.d_shape:self.d_bbox] 
+            input_boxes_other = input_boxes[:, :, self.d_bbox:] 
+            pred_x = torch.cat([ pred_x_trans, input_boxes_size, pred_x_angle, input_boxes_other ], dim=-1).contiguous()
+            
         feat = pred_x[:,:,self.d_bbox+self.d_class:].cpu().detach().numpy()
         bbox_params = {
                         "class_labels": pred_x[:,:,self.d_bbox:self.d_bbox+self.d_class],
@@ -637,10 +648,11 @@ class CollisionOptimizer(Optimizer):
                         "angles":  pred_x[:,:,6:self.d_bbox],  #TODO
                         "objfeats_32": feat
                     }
+
         boxes = self.dataset.post_process_cuda(bbox_params)
         return boxes
 
-    def gradient(self, x: torch.Tensor, data: Dict, variance: torch.Tensor, room_outer_box=None, doors=None, floor_plan=None, floor_plan_centroid=None, objectness=None) -> torch.Tensor:
+    def gradient(self, x: torch.Tensor, data: Dict, variance: torch.Tensor, room_outer_box=None, doors=None, floor_plan=None, floor_plan_centroid=None, objectness=None, input_boxes=None) -> torch.Tensor:
         """ Compute gradient for optimizer constraint
 
         Args:
@@ -658,7 +670,7 @@ class CollisionOptimizer(Optimizer):
             x_in = x.detach().requires_grad_(True)  
 
             with torch.autograd.set_detect_anomaly(True):
-                obj = self.optimize(x_in, data, room_outer_box, doors=doors, floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid, objectness=objectness)
+                obj = self.optimize(x_in, data, room_outer_box, doors=doors, floor_plan=floor_plan, floor_plan_centroid=floor_plan_centroid, objectness=objectness, input_boxes=input_boxes)
                 if obj == 0:
                     return None
                 grad = torch.autograd.grad(obj, x_in)[0]

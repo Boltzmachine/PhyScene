@@ -57,8 +57,6 @@ def get_dataset_raw_and_encoded(
         augmentations,
         config.get("box_ordering", None)
     )
-    import ipdb; ipdb.set_trace()
-
 
     return dataset, encoding
 

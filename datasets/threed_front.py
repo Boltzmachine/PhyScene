@@ -5,6 +5,7 @@ from tkinter import E
 import numpy as np
 import json
 import os
+import re
 
 from PIL import Image
 
@@ -294,7 +295,7 @@ class ThreedFront(BaseDataset):
         return cls([s for s in map(filter_fn, scenes) if s], bounds)
 
 
-class CachedRoom(object):
+class CachedRoom(Room):
     def __init__(
         self,
         scene_id,
@@ -311,7 +312,7 @@ class CachedRoom(object):
         objfeats_pc_ulip,
         image_path
     ):
-        self.scene_id = scene_id
+        self.scene_id = str(scene_id)
         self.room_layout = room_layout
         self.floor_plan_faces = floor_plan_faces
         self.floor_plan_vertices = floor_plan_vertices
@@ -324,6 +325,13 @@ class CachedRoom(object):
         self.objfeats_32 = objfeats_32
         self.objfeats_pc_ulip = objfeats_pc_ulip
         self.image_path = image_path
+
+    @property
+    def uid(self):
+        pattern = fr'([\w-]+_{self.scene_id})'
+        uid = re.search(pattern, self.image_path).group(0)
+        return uid
+
 
     @property
     def floor_plan(self):
